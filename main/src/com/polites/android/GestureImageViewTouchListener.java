@@ -121,7 +121,8 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 			startFling();
 		}
 		
-		if(doubleTapDetector.onTouchEvent(event)) {
+		boolean doubleTapDetected = doubleTapDetector.onTouchEvent(event);
+		if(doubleTapDetected) {
 			initialDistance = 0;
 			lastScale = image.getScale();
 			currentScale = image.getScale();
@@ -159,7 +160,9 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 				imageListener.onScale(currentScale);
 				imageListener.onPosition(next.x, next.y);
 				
-				if(touchDownOutsideDrawable && coordinatesOutsideDrawable(event.getX(), event.getY())) {
+				if(!doubleTapDetected &&
+						touchDownOutsideDrawable &&
+						coordinatesOutsideDrawable(event.getX(), event.getY())) {
 					imageListener.onTouchOutsideDrawable(event.getX(), event.getY());
 				}
 			}
@@ -175,7 +178,7 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 			
 			if(imageListener != null) {
 				imageListener.onTouch(last.x, last.y);
-				touchDownOutsideDrawable = coordinatesOutsideDrawable(last.x, last.x);
+				touchDownOutsideDrawable = !doubleTapDetected && coordinatesOutsideDrawable(last.x, last.y);
 			}
 			
 			touched = true;
@@ -344,7 +347,6 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	}
 	
 	protected void calculateBoundaries() {
-		
 		int effectiveWidth = Math.round( (float) imageWidth * currentScale );
 		int effectiveHeight = Math.round( (float) imageHeight * currentScale );
 		
@@ -366,9 +368,9 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	
 	private boolean coordinatesOutsideDrawable(float x, float y) {
 		Rect r = image.getDrawable().getBounds();
-		return 	y < (centerY + r.top 	* currentScale) ||
-				y > (centerY + r.bottom * currentScale) ||
-				x < (centerX + r.left 	* currentScale) ||
-				x > (centerX + r.right 	* currentScale);
+		return  y < (centerY + (r.top    * currentScale)) ||
+				y > (centerY + (r.bottom * currentScale)) ||
+				x < (centerX + (r.left   * currentScale)) ||
+				x > (centerX + (r.right  * currentScale));
 	}
 }
