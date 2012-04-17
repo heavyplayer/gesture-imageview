@@ -15,6 +15,7 @@ public abstract class GestureImageViewListener {
 	
 	public void onPosition(float x, float y) { }
 	
-	public void onTouchOutsideDrawable(float x, float y) { }
+	public void onTouchDrawable(float x, float y) { }
 	
+	public void onTouchOutsideDrawable(float x, float y) { }
 }

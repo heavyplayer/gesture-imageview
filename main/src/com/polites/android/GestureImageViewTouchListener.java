@@ -3,6 +3,7 @@ package com.polites.android;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.view.GestureDetector;
+import android.view.GestureDetector.SimpleOnGestureListener;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.View.OnTouchListener;
@@ -20,7 +21,6 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	private final VectorF pinchVector = new VectorF();
 	
 	boolean touched = false;
-	boolean touchDownOutsideDrawable = false;
 	
 	private float initialDistance;
 	private float lastScale = 1.0f;
@@ -51,11 +51,12 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	private int imageWidth;
 	private int imageHeight;
 	
-	private DoubleTapListener doubleTapListener;
-	private FlingListener flingListener;
+	private float velocityX;
+	private float velocityY;
+	
 	private FlingAnimation flingAnimation;
-	private GestureDetector doubleTapDetector;
-	private GestureDetector flingDetector;
+	private GestureDetector gestureDetector;
+	private GestureListener gestureListener;
 	private GestureImageViewListener imageListener;
 
 	public GestureImageViewTouchListener(GestureImageView image, int displayWidth, int displayHeight) {
@@ -86,8 +87,6 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 		next.x = image.getX();
 		next.y = image.getY();
 		
-		doubleTapListener = new DoubleTapListener(image, this);
-		flingListener = new FlingListener();
 		flingAnimation = new FlingAnimation();
 		
 		flingAnimation.setListener(new FlingAnimationListener() {
@@ -97,8 +96,8 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 			}
 		});
 		
-		doubleTapDetector = new GestureDetector(null, doubleTapListener);
-		flingDetector = new GestureDetector(null, flingListener);
+		gestureListener = new GestureListener();
+		gestureDetector = new GestureDetector(image.getContext(), gestureListener);
 		
 		imageListener = image.getGestureImageViewListener();
 		
@@ -106,8 +105,8 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	}
 	
 	private void startFling() {
-		flingAnimation.setVelocityX(flingListener.getVelocityX());
-		flingAnimation.setVelocityY(flingListener.getVelocityY());
+		flingAnimation.setVelocityX(velocityX);
+		flingAnimation.setVelocityY(velocityY);
 		image.animationStart(flingAnimation);
 	}
 	
@@ -117,142 +116,176 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 	
 	@Override
 	public boolean onTouch(View v, MotionEvent event) {
-		if(event.getPointerCount() == 1 && flingDetector.onTouchEvent(event)) {
-			startFling();
+		gestureDetector.onTouchEvent(event);
+		
+		switch(event.getAction()) {
+		
+			case MotionEvent.ACTION_UP:
+				multiTouch = false;
+				
+				initialDistance = 0;
+				lastScale = currentScale;
+				
+				if(!canDragX) {
+					next.x = centerX;
+				}
+				
+				if(!canDragY) {
+					next.y = centerY;
+				}
+				
+				boundCoordinates();
+				
+				image.setScale(currentScale);
+				image.setPosition(next.x, next.y);
+				
+				if(imageListener != null) {
+					imageListener.onScale(currentScale);
+					imageListener.onPosition(next.x, next.y);
+				}
+				
+				image.redraw();
+				
+				break;
+				
+			case MotionEvent.ACTION_DOWN:
+				stopFling();
+				
+				last.x = event.getX();
+				last.y = event.getY();
+				
+				if(imageListener != null) {
+					imageListener.onTouch(last.x, last.y);
+				}
+				
+				touched = true;
+				
+				break;
+				
+			case MotionEvent.ACTION_MOVE:
+				if(event.getPointerCount() > 1) {
+					multiTouch = true;
+					
+					if(initialDistance > 0) {
+						pinchVector.set(event);
+						pinchVector.calculateLength();
+						
+						float distance = pinchVector.length;
+						
+						// We have moved (scaled)
+						if(initialDistance != distance) {
+							currentScale = (distance / initialDistance) * lastScale;
+							
+							if(currentScale > maxScale) {
+								currentScale = maxScale;	
+							}
+							else if (currentScale < minScale) {
+								currentScale = minScale;
+							}
+							
+							calculateBoundaries();
+							
+							scaleVector.length *= currentScale;
+							
+							scaleVector.calculateEndPoint();
+							
+							scaleVector.length /= currentScale;
+							
+							next.x = scaleVector.end.x;
+							next.y = scaleVector.end.y;
+							
+							image.setScale(currentScale);
+							image.setPosition(next.x, next.y);
+							
+							if(imageListener != null) {
+								imageListener.onScale(currentScale);
+								imageListener.onPosition(next.x, next.y);
+							}
+							
+							image.redraw();
+						}
+					}
+					else {
+						initialDistance = MathUtils.distance(event);
+						
+						MathUtils.midpoint(event, midpoint);
+						
+						scaleVector.setStart(midpoint);
+						scaleVector.setEnd(next);
+						
+						scaleVector.calculateLength();
+						scaleVector.calculateAngle();
+						
+						scaleVector.length /= lastScale;
+					}
+				}
+				else {
+					if(!touched) {
+						touched = true;
+						last.x = event.getX();
+						last.y = event.getY();
+						next.x = image.getX();
+						next.y = image.getY();
+					}
+					else if(!multiTouch) {
+						if(handleDrag(event.getX(), event.getY())) {
+							image.redraw();
+						}
+					}
+				}
+				
+				break;
+				
+			default:
+				break;
 		}
 		
-		boolean doubleTapDetected = doubleTapDetector.onTouchEvent(event);
-		if(doubleTapDetected) {
+		return true;
+	}
+	
+	class GestureListener extends SimpleOnGestureListener {
+		@Override
+		public boolean onSingleTapConfirmed(MotionEvent e) {
+			if(coordinatesOutsideDrawable(e.getX(), e.getY())) {
+				imageListener.onTouchOutsideDrawable(e.getX(), e.getY());
+			}
+			else {
+				imageListener.onTouchDrawable(e.getX(), e.getY());
+			}
+			
+			return true;
+		}
+		
+		@Override
+		public boolean onDoubleTap(MotionEvent e) {
+			if(image.getScale() == getStartingScale())
+				image.setScale(getDoubleTapScale());
+			else
+				image.reset();
+			
 			initialDistance = 0;
 			lastScale = image.getScale();
 			currentScale = image.getScale();
 			next.x = image.getX();
 			next.y = image.getY();
 			calculateBoundaries();
+			
+			return true;
 		}
 		
-		if(event.getAction() == MotionEvent.ACTION_UP) {
-			
-			multiTouch = false;
-			
-			initialDistance = 0;
-			lastScale = currentScale;
-			
-			if(!canDragX) {
-				next.x = centerX;
-			}
-			
-			if(!canDragY) {
-				next.y = centerY;
-			}
-			
-			boundCoordinates();
-			
-			image.setScale(currentScale);
-			image.setPosition(next.x, next.y);
-			
-			if(imageListener != null) {
-				imageListener.onScale(currentScale);
-				imageListener.onPosition(next.x, next.y);
+		@Override
+		public boolean onFling(MotionEvent e1, MotionEvent e2, float vX, float vY) {
+			if(e2.getPointerCount() == 1) {
+				velocityX = vX;
+				velocityY = vY;
 				
-				if(!doubleTapDetected &&
-						touchDownOutsideDrawable &&
-						coordinatesOutsideDrawable(event.getX(), event.getY())) {
-					imageListener.onTouchOutsideDrawable(event.getX(), event.getY());
-				}
+				startFling();
+				
+				return true;
 			}
 			
-			image.redraw();
+			return false;
 		}
-
-		else if(event.getAction() == MotionEvent.ACTION_DOWN) {
-			stopFling();
-			
-			last.x = event.getX();
-			last.y = event.getY();
-			
-			if(imageListener != null) {
-				imageListener.onTouch(last.x, last.y);
-				touchDownOutsideDrawable = !doubleTapDetected && coordinatesOutsideDrawable(last.x, last.y);
-			}
-			
-			touched = true;
-		}
-		else if(event.getAction() == MotionEvent.ACTION_MOVE) {
-			if(event.getPointerCount() > 1) {
-				multiTouch = true;
-				if(initialDistance > 0) {
-					
-					pinchVector.set(event);
-					pinchVector.calculateLength();
-					
-					float distance = pinchVector.length;
-					
-					if(initialDistance != distance) {
-						
-						// We have moved (scaled)
-						currentScale = (distance / initialDistance) * lastScale;
-						
-						if(currentScale > maxScale) {
-							currentScale = maxScale;	
-						}
-						else if (currentScale < minScale) {
-							currentScale = minScale;
-						}
-						
-						calculateBoundaries();
-						
-						scaleVector.length *= currentScale;
-						
-						scaleVector.calculateEndPoint();
-						
-						scaleVector.length /= currentScale;
-						
-						next.x = scaleVector.end.x;
-						next.y = scaleVector.end.y;
-						
-						image.setScale(currentScale);
-						image.setPosition(next.x, next.y);
-						
-						if(imageListener != null) {
-							imageListener.onScale(currentScale);
-							imageListener.onPosition(next.x, next.y);
-						}
-						
-						image.redraw();
-					}
-				}
-				else {
-					initialDistance = MathUtils.distance(event);
-					
-					MathUtils.midpoint(event, midpoint);
-					
-					scaleVector.setStart(midpoint);
-					scaleVector.setEnd(next);
-					
-					scaleVector.calculateLength();
-					scaleVector.calculateAngle();
-					
-					scaleVector.length /= lastScale;
-				}
-			}
-			else {
-				if(!touched) {
-					touched = true;
-					last.x = event.getX();
-					last.y = event.getY();
-					next.x = image.getX();
-					next.y = image.getY();
-				}
-				else if(!multiTouch) {
-					if(handleDrag(event.getX(), event.getY())) {
-						image.redraw();
-					}
-				}
-			}
-		}
-		
-		return true;
 	}
 	
 	protected boolean handleDrag(float x, float y) {
