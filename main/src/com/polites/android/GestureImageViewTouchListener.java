@@ -148,11 +148,6 @@ public class GestureImageViewTouchListener implements OnTouchListener {
 			
 			boundCoordinates();
 			
-			if(!canDragX && !canDragY) {
-				currentScale = startingScale;
-				lastScale = currentScale;
-			}
-			
 			image.setScale(currentScale);
 			image.setPosition(next.x, next.y);
 			
